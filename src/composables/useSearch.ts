@@ -3,28 +3,112 @@ import type { SearchResult } from '@/types'
 
 const CONFIG_QUERY = /^(open\s+config|open-config|config|配置文件|设置文件)$/i
 const THEME_QUERY = /^(theme|toggle-theme|切换主题|主题|深色|浅色|暗色|亮色)$/i
-const SETTINGS_QUERY = /^(settings|设置|open-settings|打开设置)$/i
+const SETTINGS_QUERY = /^(settings|设置|open-settings|打开设置|偏好|preferences?|shezhi|sz)$/i
+const SETTINGS_PREFIX = /^设{1,2}$/
+const SEARCH_DEBOUNCE_MS = 120
+
+function isSettingsIntent(q: string): boolean {
+  const trimmed = q.trim()
+  return SETTINGS_QUERY.test(trimmed) || SETTINGS_PREFIX.test(trimmed)
+}
+
+function shouldFetchFiles(query: string): boolean {
+  const q = query.trim()
+  if (!q) return false
+  if (/^(clip|cb|剪贴板|clipboard|snip|snippet|片段|设置|设|settings)/i.test(q)) return false
+  return true
+}
+
+function mergeWithFiles(fast: SearchResult[], files: SearchResult[], limit: number): SearchResult[] {
+  if (files.length === 0) return fast
+
+  const withoutFiles = fast.filter((r) => r.type !== 'file')
+  let insertAt = 0
+  for (const r of withoutFiles) {
+    if (r.type === 'app' || r.type === 'calc') insertAt++
+    else break
+  }
+
+  const sortedFiles = [...files].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return a.title.localeCompare(b.title, 'zh-CN')
+  })
+
+  const merged = [
+    ...withoutFiles.slice(0, insertAt),
+    ...sortedFiles,
+    ...withoutFiles.slice(insertAt),
+  ]
+
+  const seen = new Set<string>()
+  return merged.filter((r) => {
+    if (seen.has(r.id)) return false
+    seen.add(r.id)
+    return true
+  }).slice(0, limit)
+}
+
+function preserveSelection(
+  prevResults: SearchResult[],
+  prevIndex: number,
+  nextResults: SearchResult[],
+): number {
+  const prevId = prevResults[prevIndex]?.id
+  if (!prevId) return 0
+  const idx = nextResults.findIndex((r) => r.id === prevId)
+  return idx >= 0 ? idx : 0
+}
 
 export function useSearch() {
   const query = ref('')
   const results = ref<SearchResult[]>([])
   const selectedIndex = ref(0)
   const loading = ref(false)
+  const filesLoading = ref(false)
   const selectedActionIndex = ref(0)
   const actionsExpanded = ref(false)
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let searchSeq = 0
+
+  function applyResults(next: SearchResult[], seq: number) {
+    if (seq !== searchSeq) return
+    selectedIndex.value = preserveSelection(results.value, selectedIndex.value, next)
+    results.value = next
+    selectedActionIndex.value = 0
+    actionsExpanded.value = false
+  }
 
   async function doSearch(q: string) {
     if (!window.electronAPI) return
-    loading.value = true
+
+    const seq = ++searchSeq
+    const hadResults = results.value.length > 0
+    loading.value = !hadResults
+
     try {
-      results.value = await window.electronAPI.search(q)
-      selectedIndex.value = 0
-      selectedActionIndex.value = 0
-      actionsExpanded.value = false
-    } finally {
+      const fast = await window.electronAPI.search(q)
+      if (seq !== searchSeq) return
+      applyResults(fast, seq)
       loading.value = false
+
+      if (!shouldFetchFiles(q)) {
+        filesLoading.value = false
+        return
+      }
+
+      filesLoading.value = true
+      const files = await window.electronAPI.searchFiles(q)
+      if (seq !== searchSeq) return
+
+      const limit = fast.length >= 20 ? 20 : Math.max(fast.length, 20)
+      const merged = mergeWithFiles(fast, files, limit)
+      applyResults(merged, seq)
+    } finally {
+      if (seq === searchSeq) {
+        loading.value = false
+        filesLoading.value = false
+      }
     }
   }
 
@@ -38,7 +122,7 @@ export function useSearch() {
 
   watch(query, (q) => {
     if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => doSearch(q), 50)
+    debounceTimer = setTimeout(() => doSearch(q), SEARCH_DEBOUNCE_MS)
   })
 
   watch(selectedIndex, () => {
@@ -90,7 +174,7 @@ export function useSearch() {
       return
     }
 
-    if (SETTINGS_QUERY.test(trimmed)) {
+    if (isSettingsIntent(trimmed)) {
       return 'open-settings' as const
     }
 
@@ -103,11 +187,14 @@ export function useSearch() {
   }
 
   function reset() {
+    searchSeq++
     query.value = ''
     results.value = []
     selectedIndex.value = 0
     selectedActionIndex.value = 0
     actionsExpanded.value = false
+    loading.value = false
+    filesLoading.value = false
     if (debounceTimer) {
       clearTimeout(debounceTimer)
       debounceTimer = null
@@ -119,6 +206,7 @@ export function useSearch() {
     results,
     selectedIndex,
     loading,
+    filesLoading,
     selectedActionIndex,
     actionsExpanded,
     moveSelection,

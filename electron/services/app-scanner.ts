@@ -1,21 +1,52 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'fs'
 import { join, basename, extname } from 'path'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
 import { platform } from 'os'
 import { loadConfig } from './config'
-import { combinedScore } from '../utils/fuzzy'
+import { matchScore } from '../utils/fuzzy'
 import type { SearchResult } from '../../src/types'
 
 export interface AppInfo {
   id: string
   name: string
   path: string
+  displayName?: string
+  bundleName?: string
   icon?: string
 }
 
 let cachedApps: AppInfo[] | null = null
 let lastScanTime = 0
 const SCAN_CACHE_TTL = 5 * 60 * 1000
+
+function readMacAppPlist(appPath: string): { displayName?: string; bundleName?: string } {
+  const plistPath = join(appPath, 'Contents', 'Info.plist')
+  if (!existsSync(plistPath)) return {}
+
+  try {
+    const json = execFileSync('plutil', ['-convert', 'json', '-o', '-', plistPath], {
+      encoding: 'utf-8',
+      timeout: 2000,
+    })
+    const data = JSON.parse(json) as Record<string, string>
+    return {
+      displayName: data.CFBundleDisplayName || data.CFBundleName,
+      bundleName: data.CFBundleName,
+    }
+  } catch {
+    try {
+      const content = readFileSync(plistPath, 'utf-8')
+      const displayMatch = content.match(/<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/)
+      const nameMatch = content.match(/<key>CFBundleName<\/key>\s*<string>([^<]+)<\/string>/)
+      return {
+        displayName: displayMatch?.[1] || nameMatch?.[1],
+        bundleName: nameMatch?.[1],
+      }
+    } catch {
+      return {}
+    }
+  }
+}
 
 function scanMacApps(): AppInfo[] {
   const apps: AppInfo[] = []
@@ -41,8 +72,16 @@ function scanMacDirectory(dir: string, apps: AppInfo[]): void {
       const fullPath = join(dir, entry)
       try {
         if (entry.endsWith('.app')) {
-          const name = entry.replace('.app', '')
-          apps.push({ id: `app:${fullPath}`, name, path: fullPath })
+          const folderName = entry.replace('.app', '')
+          const plist = readMacAppPlist(fullPath)
+          const displayName = plist.displayName || folderName
+          apps.push({
+            id: `app:${fullPath}`,
+            name: displayName,
+            path: fullPath,
+            displayName,
+            bundleName: plist.bundleName,
+          })
         } else if (statSync(fullPath).isDirectory() && !entry.startsWith('.')) {
           scanMacDirectory(fullPath, apps)
         }
@@ -83,7 +122,7 @@ function scanWindowsDirectory(dir: string, apps: AppInfo[], depth: number): void
           scanWindowsDirectory(fullPath, apps, depth + 1)
         } else if (/\.(exe|lnk)$/i.test(entry)) {
           const name = basename(entry, extname(entry))
-          apps.push({ id: `app:${fullPath}`, name, path: fullPath })
+          apps.push({ id: `app:${fullPath}`, name, path: fullPath, displayName: name })
         }
       } catch { /* skip */ }
     }
@@ -95,7 +134,8 @@ function scanWindowsLnk(dir: string, apps: AppInfo[]): void {
     for (const entry of readdirSync(dir)) {
       const fullPath = join(dir, entry)
       if (entry.endsWith('.lnk')) {
-        apps.push({ id: `app:${fullPath}`, name: basename(entry, '.lnk'), path: fullPath })
+        const name = basename(entry, '.lnk')
+        apps.push({ id: `app:${fullPath}`, name, path: fullPath, displayName: name })
       } else if (statSync(fullPath).isDirectory()) {
         scanWindowsLnk(fullPath, apps)
       }
@@ -125,7 +165,7 @@ function scanLinuxApps(): AppInfo[] {
           if (hidden || !nameMatch) continue
           const name = nameMatch[1].trim()
           const exec = execMatch?.[1]?.replace(/%[fuFUFU]/g, '').trim() || fullPath
-          apps.push({ id: `app:${fullPath}`, name, path: exec })
+          apps.push({ id: `app:${fullPath}`, name, path: exec, displayName: name })
         } catch { /* skip */ }
       }
     } catch { /* skip */ }
@@ -152,10 +192,19 @@ export function scanApps(force = false): AppInfo[] {
 function deduplicateApps(apps: AppInfo[]): AppInfo[] {
   const seen = new Map<string, AppInfo>()
   for (const app of apps) {
-    const key = app.name.toLowerCase()
-    if (!seen.has(key)) seen.set(key, app)
+    if (!seen.has(app.path)) seen.set(app.path, app)
   }
   return Array.from(seen.values())
+}
+
+function appSearchFields(app: AppInfo): string[] {
+  const folderName = basename(app.path).replace(/\.app$/, '')
+  return [
+    app.displayName || app.name,
+    app.name,
+    app.bundleName || '',
+    folderName,
+  ].filter(Boolean)
 }
 
 export function searchApps(query: string, limit: number): SearchResult[] {
@@ -167,7 +216,7 @@ export function searchApps(query: string, limit: number): SearchResult[] {
   return apps
     .map((app) => ({
       app,
-      score: combinedScore(query, app.name),
+      score: matchScore(query, appSearchFields(app)),
     }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score)
@@ -175,7 +224,7 @@ export function searchApps(query: string, limit: number): SearchResult[] {
     .map(({ app, score }) => ({
       id: app.id,
       type: 'app' as const,
-      title: app.name,
+      title: app.displayName || app.name,
       subtitle: app.path,
       score,
       payload: { path: app.path },

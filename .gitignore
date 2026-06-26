@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 release/
+docs/wechat/
 *.log
 .DS_Store
 *.local

@@ -2,16 +2,64 @@ import { loadConfig, isConfigQuery, isThemeQuery, isSettingsQuery, openConfigInE
 import { getUsageBoost, recordUsage } from './database'
 import { searchApps, launchApp, scanApps } from './app-scanner'
 import { searchCalculator, copyCalcResult } from './calculator'
-import { searchWeb, openWebSearch, openWebSearchByEngine } from './web-search'
-import { searchCommands, executeCommand } from './commands'
+import { searchWeb, openWebSearch, openWebSearchByEngine, parseWebQuery } from './web-search'
+import { searchCommands, searchSettingsCommands, executeCommand } from './commands'
 import { searchClipboard, pasteClipboardText } from './clipboard'
 import { searchPlugins, executePlugin } from './plugin-loader'
 import { searchFiles, executeFileAction } from './file-search'
 import { getRecentSearchResults, getQuickAccessApps } from './recents'
 import { searchSnippets, executeSnippet } from './snippets'
 import { enrichResultWithIcon } from './icon-extractor'
+import { parseSearchQuery, isSettingsModeQuery } from './query-mode'
 import { shell } from 'electron'
 import type { SearchResult } from '../../src/types'
+
+export { isClipboardModeQuery as isClipboardQuery } from './query-mode'
+
+async function applyBoostAndIcons(results: SearchResult[]): Promise<SearchResult[]> {
+  return Promise.all(results.map(async (r) => {
+    const iconUrl = (await enrichResultWithIcon(r)) ?? undefined
+    return {
+      ...r,
+      iconUrl,
+      score: r.score + getUsageBoost(r.id, r.type),
+    }
+  }))
+}
+
+function dedupeResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>()
+  return results.filter((r) => {
+    if (seen.has(r.id)) return false
+    seen.add(r.id)
+    return true
+  })
+}
+
+export function stableSortByScore(results: SearchResult[]): SearchResult[] {
+  return results
+    .map((r, index) => ({ r, index }))
+    .sort((a, b) => {
+      if (b.r.score !== a.r.score) return b.r.score - a.r.score
+      const titleCmp = a.r.title.localeCompare(b.r.title, 'zh-CN')
+      if (titleCmp !== 0) return titleCmp
+      return a.index - b.index
+    })
+    .map(({ r }) => r)
+}
+
+function sortByScore(results: SearchResult[]): SearchResult[] {
+  return stableSortByScore(results)
+}
+
+export function mergeTieredResults(
+  tier1: SearchResult[],
+  tier2: SearchResult[],
+  tier3: SearchResult[],
+  limit: number,
+): SearchResult[] {
+  return dedupeResults([...sortByScore(tier1), ...sortByScore(tier2), ...sortByScore(tier3)]).slice(0, limit)
+}
 
 export async function performSearch(query: string): Promise<SearchResult[]> {
   const config = loadConfig()
@@ -22,54 +70,60 @@ export async function performSearch(query: string): Promise<SearchResult[]> {
     return getRecentSearchResults(Math.min(limit, 10))
   }
 
-  const results: SearchResult[] = []
+  const parsed = parseSearchQuery(trimmed)
+
+  if (parsed.mode === 'clipboard') {
+    const results = searchClipboard(parsed.term)
+    return applyBoostAndIcons(results.slice(0, limit))
+  }
+
+  if (parsed.mode === 'snippet') {
+    const results = searchSnippets(parsed.term)
+    return applyBoostAndIcons(results.slice(0, limit))
+  }
+
+  if (parsed.mode === 'settings') {
+    const results = searchSettingsCommands(parsed.term)
+    return applyBoostAndIcons(results.slice(0, limit))
+  }
 
   const calcResults = searchCalculator(trimmed)
-  if (calcResults.length > 0) results.push(...calcResults)
-
   const webResults = searchWeb(trimmed)
-  if (webResults.some((r) => !r.payload.hint)) {
-    results.push(...webResults.filter((r) => !r.payload.hint))
+  const webActionResults = webResults.filter((r) => !r.payload.hint)
+  const webHintResults = webResults.filter((r) => r.payload.hint)
+
+  const apps = searchApps(trimmed, limit)
+  const commands = searchCommands(trimmed)
+  const pluginResults = await searchPlugins(trimmed)
+  const snippetResults = searchSnippets(trimmed)
+
+  const tier1: SearchResult[] = [...apps, ...calcResults]
+  const tier2: SearchResult[] = [...commands, ...snippetResults, ...pluginResults, ...webActionResults]
+
+  const tier3: SearchResult[] = []
+  const hasWebPrefix = parseWebQuery(trimmed) !== null
+  const primaryCount = apps.length + calcResults.length
+  if (hasWebPrefix || primaryCount < 3) {
+    tier3.push(...webHintResults)
   }
 
-  if (trimmed.toLowerCase().startsWith('clip ') || trimmed.toLowerCase().startsWith('cb ')) {
-    results.push(...searchClipboard(trimmed))
-  }
+  const merged = mergeTieredResults(tier1, tier2, tier3, limit)
+  return applyBoostAndIcons(merged)
+}
 
-  const [apps, commands, files, clipboardResults, pluginResults, snippetResults] = await Promise.all([
-    Promise.resolve(searchApps(trimmed, limit)),
-    Promise.resolve(searchCommands(trimmed)),
-    searchFiles(trimmed),
-    Promise.resolve(trimmed.toLowerCase().startsWith('clip ') ? [] : searchClipboard(trimmed)),
-    searchPlugins(trimmed),
-    Promise.resolve(searchSnippets(trimmed)),
-  ])
+/** File search only — called after fast results to avoid blocking the UI */
+export async function performSearchFiles(query: string): Promise<SearchResult[]> {
+  const trimmed = query.trim()
+  if (!trimmed) return []
 
-  results.push(...apps, ...commands, ...files, ...clipboardResults, ...pluginResults, ...snippetResults)
+  const parsed = parseSearchQuery(trimmed)
+  if (parsed.mode !== 'default') return []
 
-  if (!webResults.some((r) => !r.payload.hint)) {
-    results.push(...webResults)
-  }
+  const config = loadConfig()
+  if (!config.fileSearch?.enabled) return []
 
-  const boosted = await Promise.all(results.map(async (r) => {
-    const iconUrl = (await enrichResultWithIcon(r)) ?? undefined
-    return {
-      ...r,
-      iconUrl,
-      score: r.score + getUsageBoost(r.id, r.type),
-    }
-  }))
-
-  const seen = new Set<string>()
-  const deduped = boosted
-    .sort((a, b) => b.score - a.score)
-    .filter((r) => {
-      if (seen.has(r.id)) return false
-      seen.add(r.id)
-      return true
-    })
-
-  return deduped.slice(0, limit)
+  const files = await searchFiles(trimmed)
+  return applyBoostAndIcons(files)
 }
 
 export async function executeResult(
@@ -77,6 +131,8 @@ export async function executeResult(
   query?: string,
   actionId?: string,
 ): Promise<void> {
+  if (result.payload.hint) return
+
   if (query && isConfigQuery(query)) {
     await openConfigInEditor()
     return
@@ -87,7 +143,7 @@ export async function executeResult(
     return
   }
 
-  if (query && isSettingsQuery(query)) {
+  if (query && (isSettingsQuery(query) || isSettingsModeQuery(query))) {
     await executeCommand('open-settings')
     return
   }

@@ -87,6 +87,7 @@ export interface PluginManifest {
 
 export interface ElectronAPI {
   search: (query: string) => Promise<SearchResult[]>
+  searchFiles: (query: string) => Promise<SearchResult[]>
   execute: (result: SearchResult, query?: string, actionId?: string) => Promise<void>
   openConfig: () => Promise<void>
   toggleTheme: () => Promise<'dark' | 'light'>

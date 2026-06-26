@@ -4,7 +4,7 @@ import { promisify } from 'util'
 import { randomUUID } from 'crypto'
 import { loadConfig } from './config'
 import { saveClipboardItem, getClipboardHistory, trimClipboardHistory } from './database'
-import { combinedScore } from '../utils/fuzzy'
+import { matchScore } from '../utils/fuzzy'
 import type { SearchResult } from '../../src/types'
 
 const execFileAsync = promisify(execFile)
@@ -50,25 +50,30 @@ export function stopClipboardMonitor(): void {
   }
 }
 
-export function searchClipboard(query: string): SearchResult[] {
+/** @param term filter term (empty = show recent history) */
+export function searchClipboard(term = ''): SearchResult[] {
   const config = loadConfig()
   const items = getClipboardHistory(config.clipboardHistorySize)
 
-  if (!query.trim()) {
-    return items.slice(0, 10).map((item) => toResult(item, 0))
+  if (!term) {
+    if (items.length === 0) {
+      return [{
+        id: 'clip:empty',
+        type: 'clipboard',
+        title: '暂无剪贴板历史',
+        subtitle: '复制一些文字后会自动出现在这里',
+        score: 100,
+        payload: { text: '', hint: true },
+      }]
+    }
+    return items.slice(0, 15).map((item, i) => toResult(item, 100 - i))
   }
 
-  const lowerQuery = query.toLowerCase()
-  const isClipboardPrefix = lowerQuery.startsWith('clip ') || lowerQuery.startsWith('cb ')
-  const searchTerm = isClipboardPrefix ? query.slice(lowerQuery.indexOf(' ') + 1) : query
-
-  if (!isClipboardPrefix && !searchTerm) return []
-
   return items
-    .map((item) => ({ item, score: combinedScore(searchTerm, item.text) }))
-    .filter(({ score }) => isClipboardPrefix ? true : score > 0)
+    .map((item) => ({ item, score: matchScore(term, [item.text]) }))
+    .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
+    .slice(0, 15)
     .map(({ item, score }) => toResult(item, score))
 }
 
@@ -89,6 +94,7 @@ function toResult(item: { id: string; text: string; timestamp: number }, score: 
 }
 
 export async function pasteClipboardText(text: string, actionId = 'paste'): Promise<void> {
+  if (!text) return
   clipboard.writeText(text)
   if (actionId === 'paste') {
     await simulatePaste()

@@ -1,5 +1,5 @@
 import { loadConfig } from './config'
-import { combinedScore } from '../utils/fuzzy'
+import { matchScore } from '../utils/fuzzy'
 import type { SearchResult, Snippet } from '../../src/types'
 import { clipboard } from 'electron'
 import { simulatePaste } from './clipboard'
@@ -9,23 +9,29 @@ export function getSnippets(): Snippet[] {
   return config.snippets ?? []
 }
 
-export function searchSnippets(query: string): SearchResult[] {
+/** @param term filter term (empty = show all snippets) */
+export function searchSnippets(term = ''): SearchResult[] {
   const snippets = getSnippets()
-  const trimmed = query.trim()
 
-  if (trimmed.toLowerCase().startsWith('snip ') || trimmed.toLowerCase().startsWith('s ')) {
-    const term = trimmed.replace(/^(snip|s)\s+/i, '')
-    return snippets
-      .filter((s) => !term || combinedScore(term, s.name) > 0 || combinedScore(term, s.trigger) > 0)
-      .map((s) => toResult(s, 90))
+  if (snippets.length === 0) {
+    return [{
+      id: 'snippet:empty',
+      type: 'snippet',
+      title: '暂无文本片段',
+      subtitle: '在 config.json 的 snippets 字段中添加',
+      score: 100,
+      payload: { snippetId: '', text: '', hint: true },
+    }]
   }
 
-  if (!trimmed) return []
+  if (!term) {
+    return snippets.map((s, i) => toResult(s, 100 - i))
+  }
 
   return snippets
     .map((s) => ({
       snippet: s,
-      score: Math.max(combinedScore(trimmed, s.name), combinedScore(trimmed, s.trigger)),
+      score: Math.max(matchScore(term, [s.name, s.trigger]), matchScore(term, [s.text])),
     }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score)
@@ -38,7 +44,7 @@ function toResult(snippet: Snippet, score: number): SearchResult {
     id: `snippet:${snippet.id}`,
     type: 'snippet',
     title: snippet.name,
-    subtitle: preview,
+    subtitle: `${snippet.trigger ? `#${snippet.trigger} · ` : ''}${preview}`,
     score,
     payload: { snippetId: snippet.id, text: snippet.text, autoPaste: snippet.autoPaste ?? false },
     actions: [

@@ -111,7 +111,8 @@ export function getUsageBoost(itemId: string, itemType: string): number {
   const usage = getUsage(itemId, itemType)
   if (!usage) return 0
   const recencyBonus = Math.max(0, 1 - (Date.now() - usage.lastUsed) / (7 * 24 * 60 * 60 * 1000))
-  return Math.log1p(usage.count) * 10 + recencyBonus * 5
+  const raw = Math.log1p(usage.count) * 10 + recencyBonus * 5
+  return Math.min(raw, 15)
 }
 
 export function saveClipboardItem(id: string, text: string): void {

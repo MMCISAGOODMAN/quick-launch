@@ -5,7 +5,7 @@ import { initDatabase, closeDatabase } from './services/database'
 import { initAppScanner } from './services/app-scanner'
 import { startClipboardMonitor, stopClipboardMonitor } from './services/clipboard'
 import { loadPlugins } from './services/plugin-loader'
-import { performSearch, executeResult, getQuickAccessResults } from './services/search-engine'
+import { performSearch, performSearchFiles, executeResult, getQuickAccessResults } from './services/search-engine'
 import {
   loadConfig,
   saveConfig,
@@ -69,6 +69,8 @@ app.on('will-quit', () => {
 })
 
 ipcMain.handle('search', async (_event, query: string) => performSearch(query))
+
+ipcMain.handle('search-files', async (_event, query: string) => performSearchFiles(query))
 
 ipcMain.handle('execute', async (_event, result: SearchResult, query?: string, actionId?: string) => {
   const keepOpen = (query && isThemeQuery(query))

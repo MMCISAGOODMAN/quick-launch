@@ -1,6 +1,6 @@
 import { shell } from 'electron'
 import { loadConfig } from './config'
-import { combinedScore } from '../utils/fuzzy'
+import { matchScore } from '../utils/fuzzy'
 import type { SearchResult, SearchEngine } from '../../src/types'
 
 export function parseWebQuery(query: string): { engine: SearchEngine; keyword: string } | null {
@@ -51,13 +51,13 @@ export function searchWebCommands(query: string): SearchResult[] {
   if (!query.trim()) return []
 
   return config.searchEngines
-    .filter((e) => combinedScore(query, e.name) > 0 || combinedScore(query, e.prefix) > 0)
+    .filter((e) => matchScore(query, [e.name, e.prefix]) > 0)
     .map((engine) => ({
       id: `web-engine:${engine.id}`,
       type: 'web' as const,
       title: engine.name,
       subtitle: `Prefix: ${engine.prefix}`,
-      score: combinedScore(query, engine.name),
+      score: matchScore(query, [engine.name, engine.prefix]),
       payload: { engineId: engine.id, hint: true },
     }))
 }

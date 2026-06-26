@@ -6,6 +6,7 @@ defineProps<{
   results: SearchResult[]
   selectedIndex: number
   loading: boolean
+  filesLoading?: boolean
   selectedActionIndex: number
   actionsExpanded: boolean
   idle?: boolean
@@ -19,11 +20,15 @@ const emit = defineEmits<{
 
 <template>
   <div class="result-list window-no-drag">
-    <div v-if="loading" class="loading-state">
+    <div v-if="loading && results.length === 0" class="loading-state">
       <span class="spinner" />
       <span>搜索中…</span>
     </div>
     <template v-else>
+      <div v-if="filesLoading" class="files-loading-bar">
+        <span class="spinner-sm" />
+        <span>正在搜索文件…</span>
+      </div>
       <div v-if="results.length === 0 && !idle" class="empty-state">
         <p>未找到结果</p>
         <p class="hint">试试其他关键词</p>
@@ -52,6 +57,25 @@ const emit = defineEmits<{
   padding: 6px 8px;
   position: relative;
   z-index: 1;
+}
+
+.files-loading-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.spinner-sm {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 
 .section-label {

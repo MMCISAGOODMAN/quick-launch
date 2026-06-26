@@ -5,6 +5,9 @@ const electronAPI = {
   search: (query: string): Promise<SearchResult[]> =>
     ipcRenderer.invoke('search', query),
 
+  searchFiles: (query: string): Promise<SearchResult[]> =>
+    ipcRenderer.invoke('search-files', query),
+
   execute: (result: SearchResult, query?: string, actionId?: string): Promise<void> =>
     ipcRenderer.invoke('execute', result, query, actionId),
 

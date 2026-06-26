@@ -1,12 +1,12 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
-import { join, basename } from 'path'
+import { join, basename, dirname } from 'path'
 import { existsSync, statSync } from 'fs'
 import { platform } from 'os'
 import { shell, clipboard } from 'electron'
 import { loadConfig } from './config'
-import { combinedScore } from '../utils/fuzzy'
+import { matchScore, MIN_MATCH_SCORE } from '../utils/fuzzy'
 import type { SearchResult } from '../../src/types'
 
 const execFileAsync = promisify(execFile)
@@ -32,13 +32,25 @@ function filterPaths(
     .filter((p) => expanded.length === 0 || expanded.some((sp) => p.startsWith(sp)))
 }
 
-function buildMdfindArgs(query: string, searchPaths: string[]): string[] {
-  const expanded = searchPaths.map(expandHome)
-  if (expanded.length === 1) {
-    return ['-onlyin', expanded[0], '-name', query]
+function escapeSpotlightQuery(query: string): string {
+  return query.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")
+}
+
+function buildFilenameSpotlightQuery(query: string): string {
+  const escaped = escapeSpotlightQuery(query)
+  return `kMDItemFSName == '*${escaped}*'cd`
+}
+
+async function runMdfind(args: string[]): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync('mdfind', args, {
+      timeout: 8000,
+      maxBuffer: 1024 * 1024 * 2,
+    })
+    return stdout.trim().split('\n').filter(Boolean)
+  } catch {
+    return []
   }
-  // Empty searchPaths: search entire Spotlight index (all volumes)
-  return ['-name', query]
 }
 
 async function searchMacFiles(query: string, limit: number): Promise<string[]> {
@@ -48,18 +60,38 @@ async function searchMacFiles(query: string, limit: number): Promise<string[]> {
 
   const searchPaths = fsConfig.searchPaths ?? []
   const exclude = fsConfig.excludePatterns ?? ['node_modules', '.git', 'Library/Caches']
+  const candidateLimit = limit * 5
+  const collected = new Set<string>()
 
-  try {
-    const { stdout } = await execFileAsync('mdfind', buildMdfindArgs(query, searchPaths), {
-      timeout: 5000,
-      maxBuffer: 1024 * 1024,
-    })
+  const filenameQuery = buildFilenameSpotlightQuery(query)
 
-    const paths = stdout.trim().split('\n').filter(Boolean)
-    return filterPaths(paths, searchPaths, exclude).slice(0, limit * 3)
-  } catch {
-    return []
+  if (searchPaths.length === 0) {
+    const primary = await runMdfind([filenameQuery])
+    primary.forEach((p) => collected.add(p))
+
+    if (collected.size < candidateLimit) {
+      const fallback = await runMdfind([query])
+      fallback.forEach((p) => collected.add(p))
+    }
+  } else {
+    for (const root of searchPaths.map(expandHome)) {
+      if (!existsSync(root)) continue
+      const primary = await runMdfind(['-onlyin', root, filenameQuery])
+      primary.forEach((p) => collected.add(p))
+      if (collected.size >= candidateLimit) break
+    }
+
+    if (collected.size < candidateLimit) {
+      for (const root of searchPaths.map(expandHome)) {
+        if (!existsSync(root)) continue
+        const fallback = await runMdfind(['-onlyin', root, query])
+        fallback.forEach((p) => collected.add(p))
+        if (collected.size >= candidateLimit) break
+      }
+    }
   }
+
+  return filterPaths(Array.from(collected), searchPaths, exclude).slice(0, candidateLimit * 2)
 }
 
 async function searchLinuxFiles(query: string, limit: number): Promise<string[]> {
@@ -69,8 +101,8 @@ async function searchLinuxFiles(query: string, limit: number): Promise<string[]>
   const searchPaths = (config.fileSearch.searchPaths ?? []).map(expandHome)
   const exclude = config.fileSearch.excludePatterns ?? ['node_modules', '.git']
   const roots = searchPaths.length > 0 ? searchPaths : ['/', '/home', '/mnt', '/media']
+  const candidateLimit = limit * 5
 
-  // Prefer locate for full-disk speed when available
   if (searchPaths.length === 0) {
     try {
       const { stdout } = await execFileAsync('locate', ['-i', query], {
@@ -78,7 +110,7 @@ async function searchLinuxFiles(query: string, limit: number): Promise<string[]>
         maxBuffer: 1024 * 512,
       })
       const paths = stdout.trim().split('\n').filter(Boolean)
-      return filterPaths(paths, [], exclude).slice(0, limit * 3)
+      return filterPaths(paths, [], exclude).slice(0, candidateLimit * 2)
     } catch { /* fall through to find */ }
   }
 
@@ -92,11 +124,11 @@ async function searchLinuxFiles(query: string, limit: number): Promise<string[]>
         '-not', '-path', '*/.git/*',
       ], { timeout: 5000, maxBuffer: 1024 * 256 })
       collected.push(...stdout.trim().split('\n').filter(Boolean))
-      if (collected.length >= limit * 3) break
+      if (collected.length >= candidateLimit * 2) break
     } catch { /* try next root */ }
   }
 
-  return filterPaths(collected, searchPaths, exclude).slice(0, limit * 3)
+  return filterPaths(collected, searchPaths, exclude).slice(0, candidateLimit * 2)
 }
 
 async function searchWindowsFiles(query: string, limit: number): Promise<string[]> {
@@ -105,7 +137,7 @@ async function searchWindowsFiles(query: string, limit: number): Promise<string[
 
   const searchPaths = config.fileSearch.searchPaths ?? []
   const safeQuery = query.replace(/"/g, '')
-  const perRoot = limit * 2
+  const perRoot = limit * 5
 
   let ps: string
   if (searchPaths.length > 0) {
@@ -122,10 +154,16 @@ async function searchWindowsFiles(query: string, limit: number): Promise<string[
     })
     const exclude = config.fileSearch.excludePatterns ?? ['node_modules', '.git']
     return filterPaths(stdout.trim().split('\r\n').filter(Boolean), searchPaths, exclude)
-      .slice(0, limit * 3)
+      .slice(0, perRoot * 2)
   } catch {
     return []
   }
+}
+
+export function scoreFilePath(filePath: string, query: string): number {
+  const name = basename(filePath)
+  const parent = basename(dirname(filePath))
+  return matchScore(query, [name, parent], filePath)
 }
 
 function pathToResult(filePath: string, query: string): SearchResult {
@@ -135,7 +173,7 @@ function pathToResult(filePath: string, query: string): SearchResult {
     isDirectory = statSync(filePath).isDirectory()
   } catch { /* skip */ }
 
-  const score = combinedScore(query, name) + (name.toLowerCase() === query.toLowerCase() ? 30 : 0)
+  const score = scoreFilePath(filePath, query)
 
   return {
     id: `file:${filePath}`,
@@ -166,8 +204,9 @@ export async function searchFiles(query: string): Promise<SearchResult[]> {
   else paths = await searchLinuxFiles(query, limit)
 
   return paths
+    .sort((a, b) => a.localeCompare(b, 'en'))
     .map((p) => pathToResult(p, query))
-    .filter((r) => r.score > 0 || query.length >= 2)
+    .filter((r) => r.score >= MIN_MATCH_SCORE)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 }

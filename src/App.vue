@@ -17,6 +17,7 @@ const {
   results,
   selectedIndex,
   loading,
+  filesLoading,
   selectedActionIndex,
   actionsExpanded,
   moveSelection,
@@ -114,6 +115,7 @@ onMounted(async () => {
           :results="results"
           :selected-index="selectedIndex"
           :loading="loading"
+          :files-loading="filesLoading"
           :selected-action-index="selectedActionIndex"
           :actions-expanded="actionsExpanded"
           :idle="showIdleView"

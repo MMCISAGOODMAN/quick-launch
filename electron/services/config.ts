@@ -22,10 +22,10 @@ export const BUILTIN_COMMANDS: CustomCommand[] = [
   },
   {
     id: 'open-settings',
-    name: '打开设置',
+    name: '设置',
     command: 'open-settings',
     shell: false,
-    description: '打开 Quick Launch 设置界面',
+    description: '打开 Quick Launch 可视化设置',
   },
 ]
 
@@ -86,7 +86,7 @@ export function isThemeQuery(query: string): boolean {
 
 export function isSettingsQuery(query: string): boolean {
   const q = query.trim().toLowerCase()
-  return /^(settings|设置|open-settings|打开设置)$/.test(q)
+  return /^(settings|设置|open-settings|打开设置|偏好|preferences?)$/.test(q)
 }
 
 export function loadConfig(): AppConfig {
