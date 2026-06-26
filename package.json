@@ -1,0 +1,156 @@
+{
+  "name": "quick-launch",
+  "version": "1.0.0",
+  "description": "Cross-platform shortcut launcher - Alfred/Raycast alternative",
+  "main": "dist-electron/main.js",
+  "author": "Quick Launch Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MMCISAGOODMAN/quick-launch.git"
+  },
+  "homepage": "https://github.com/MMCISAGOODMAN/quick-launch#readme",
+  "bugs": {
+    "url": "https://github.com/MMCISAGOODMAN/quick-launch/issues"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build && electron-builder --publish never",
+    "build:dir": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build && electron-builder --dir --publish never",
+    "build:mac": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build && electron-builder --mac --publish never",
+    "build:win": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build && electron-builder --win --publish never",
+    "build:linux": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && vite build && electron-builder --linux --publish never",
+    "pack": "npm run build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "mathjs": "^14.4.0",
+    "pinyin-pro": "^3.26.0",
+    "sql.js": "^1.14.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.2.6",
+    "vue-tsc": "^2.2.0"
+  },
+  "build": {
+    "appId": "com.quicklaunch.app",
+    "productName": "Quick Launch",
+    "copyright": "Copyright © 2026 Quick Launch Team",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/sql.js/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "artifactName": "Quick-Launch-${version}-${os}-${arch}.${ext}",
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
+    },
+    "extraResources": [
+      {
+        "from": "config/config.example.json",
+        "to": "config.example.json"
+      },
+      {
+        "from": "plugins",
+        "to": "plugins"
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "icon": "resources/icon.png",
+      "synopsis": "Cross-platform shortcut launcher",
+      "description": "Quick Launch - Alfred/Raycast alternative for app search, web search, calculator and custom commands."
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Quick Launch",
+      "installerIcon": "resources/icon.png",
+      "uninstallerIcon": "resources/icon.png",
+      "installerHeaderIcon": "resources/icon.png",
+      "runAfterFinish": true
+    },
+    "dmg": {
+      "title": "Quick Launch ${version}",
+      "icon": "resources/icon.png"
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "hotkey": "Alt+Shift+Space",
+  "theme": "dark",
+  "maxResults": 20,
+  "clipboardHistorySize": 50,
+  "window": {
+    "width": 680,
+    "height": 420
+  },
+  "searchEngines": [
+    {
+      "id": "google",
+      "name": "Google",
+      "prefix": "g",
+      "url": "https://www.google.com/search?q={query}"
+    },
+    {
+      "id": "baidu",
+      "name": "Baidu",
+      "prefix": "bd",
+      "url": "https://www.baidu.com/s?wd={query}"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "prefix": "gh",
+      "url": "https://github.com/search?q={query}"
+    },
+    {
+      "id": "stackoverflow",
+      "name": "Stack Overflow",
+      "prefix": "so",
+      "url": "https://stackoverflow.com/search?q={query}"
+    }
+  ],
+  "customCommands": [
+    {
+      "id": "restart-nginx",
+      "name": "Restart Nginx",
+      "command": "sudo nginx -s reload",
+      "shell": true,
+      "description": "Reload nginx configuration"
+    },
+    {
+      "id": "open-config",
+      "name": "Open Config",
+      "command": "open-config",
+      "shell": false,
+      "description": "Open Quick Launch config file"
+    },
+    {
+      "id": "toggle-theme",
+      "name": "切换主题",
+      "command": "toggle-theme",
+      "shell": false,
+      "description": "在暗色 / 亮色主题间切换"
+    },
+    {
+      "id": "open-settings",
+      "name": "打开设置",
+      "command": "open-settings",
+      "shell": false,
+      "description": "打开 Quick Launch 设置界面"
+    }
+  ],
+  "snippets": [
+    {
+      "id": "email",
+      "name": "邮箱签名",
+      "trigger": "email",
+      "text": "Best regards,\nYour Name",
+      "autoPaste": true
+    }
+  ],
+  "quickAccess": [],
+  "fileSearch": {
+    "enabled": true,
+    "maxResults": 15,
+    "searchPaths": [],
+    "excludePatterns": ["node_modules", ".git", "Library/Caches"]
+  },
+  "appScanPaths": []
+}
