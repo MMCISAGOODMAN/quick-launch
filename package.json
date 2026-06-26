@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Cross-platform shortcut launcher - Alfred/Raycast alternative",
   "main": "dist-electron/main.js",
-  "author": "Quick Launch Team",
+  "author": "mamingcong <MMCISAGOODMAN@users.noreply.github.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -118,6 +118,7 @@
       "icon": "resources/icon.ico"
     },
     "linux": {
+      "maintainer": "mamingcong <MMCISAGOODMAN@users.noreply.github.com>",
       "target": [
         {
           "target": "AppImage",
